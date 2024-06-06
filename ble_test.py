@@ -57,7 +57,7 @@ import sys
 from terminal import Terminal
 import time
 import threading
-
+from max_ble_hci import BleHci
 
 RETRY_LIMIT = 1
 
@@ -133,7 +133,7 @@ def start_threads(sp0, sp1, tp0, tp1):
     return terminal_thread
 
 
-def phy_timing_test(terminal_thd, addr1, addr2, new_phy):
+def phy_timing_test(hci0: BleHci, hci1 :BleHci, addr1, addr2, new_phy):
     """
 
     """
@@ -144,30 +144,30 @@ def phy_timing_test(terminal_thd, addr1, addr2, new_phy):
         print(f'{new_phy} is invalid new phy. Changed to 2 (2M).')
     print(f'\n<<<<<< Start PHY timing test ({phy_cmd[new_phy - 1]}).\n')
 
-    time.sleep(0.5)
 
     print(f'\nmaster: reset\n')
-    terminal_thd.input_cmd(0, "reset")
-    time.sleep(0.5)
+    hci0.reset()
 
     print(f'\nslave: reset\n')
-    terminal_thd.input_cmd(1, "reset")
-    time.sleep(0.5)
+    hci1.reset()
+    
 
     print(f'\nmaster: set address {addr1}\n')
-    terminal_thd.input_cmd(0, "addr " + addr1)
-    time.sleep(0.5)
+    hci0.set_address(addr1)
+
 
     print(f'\nslave: set address {addr2}\n')
-    terminal_thd.input_cmd(1, "addr " + addr2)
-    time.sleep(0.5)
+    hci1.set_address(addr2)
+
 
     print(f'\nmaster: start to advertise\n')
-    terminal_thd.input_cmd(0, "adv -l 5 -i 20")
+    hci0.start_advertising()
+    # terminal_thd.input_cmd(0, "adv -l 5 -i 20")
     time.sleep(1)
 
     print(f'\nslave: start to connect\n')
-    terminal_thd.input_cmd(1, "init -l 6 -s " + addr1)
+    # terminal_thd.input_cmd(1, "init -l 6 -s " + addr1)
+    hci1.init_connection(addr1)
     time.sleep(1)
 
     # NOTE: if nordic board is BT_VER 11, the PHY change will fail.
@@ -176,18 +176,28 @@ def phy_timing_test(terminal_thd, addr1, addr2, new_phy):
     #terminal_thd.input_cmd(0, "phy " + str(new_phy))  # the PHY switching time is about 59.7 ms.
     
     print(f'\nslave: change PHY to {new_phy}\n')
-    terminal_thd.input_cmd(1, "phy " + str(new_phy))  # the PHY switching time is about 67.5 ms.
+
+    phy_str = phy_cmd[new_phy - 1]
+
+    # if coded apply correct phy options
+    if phy_str == "S2":
+        phy_opts = 1
+    elif phy_str == "S8":
+        phy_opts = 2
+    else:
+        phy_opts = 0
+        
+
+    hci0.set_phy(0, tx_phys= new_phy - 1 , phy_opts=phy_opts) # the PHY switching time is about 67.5 ms.
     time.sleep(1)
 
     print(f'\nmaster: reset\n')
-    terminal_thd.input_cmd(0, "reset")
-    time.sleep(0.5)
-
+    hci0.reset()
+    
     print(f'\nslave: reset\n')
-    terminal_thd.input_cmd(1, "reset")
+    hci1.reset()
     time.sleep(0.5)
 
-    terminal_thd.input = "exit"
 
     print(f'\n<<<<<< Finish PHY timing test ({phy_cmd[new_phy - 1]}).\n')
 
@@ -280,13 +290,16 @@ def run_phy_timing_test(args, new_phy):
     else:
         sp1 = args.sp1
 
-    term_thread = start_threads(sp0, sp1, args.tp0, args.tp1)
+    # term_thread = start_threads(sp0, sp1, args.tp0, args.tp1)
+    hci0 = BleHci(sp0)
+    hci1 = BleHci(sp1)
+
 
     sniffer_thd = threading.Thread(target=run_sniffer, args=(interface, device, brd0_addr, timeout, q))
     sniffer_thd.daemon = True
     sniffer_thd.start()
 
-    phy_timing_test(term_thread, brd0_addr, brd1_addr, new_phy)
+    phy_timing_test(hci0, hci1, brd0_addr, brd1_addr, new_phy)
 
     sniffer_thd.join()  # wait the test to finish
 
@@ -446,4 +459,3 @@ if __name__ == "__main__":
             sys.exit(res)
 
     print(f"\n{str(datetime.datetime.now())} - Done!")
-
